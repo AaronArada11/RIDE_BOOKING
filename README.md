@@ -112,7 +112,7 @@ Server -> OK
 
 #### Registry queries
 
-Clients can also request all bookings or all drivers:
+Clients can also request all bookings or all drivers: (FOR TESTING ONLY)
 
 ```text
 Passenger/admin client -> BOOKINGS -> Server
