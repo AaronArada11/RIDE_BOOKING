@@ -2,8 +2,8 @@
 #include <climits>
 #include <condition_variable>
 #include <cstdlib>
-#include <ctime>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -36,8 +36,8 @@ using namespace std;
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const int MAP_W = 10;
-const int MAP_H = 10;
+const int MAP_W = 100;
+const int MAP_H = 100;
 const int DISPATCHER_THREADS = 4;
 const int DRIVER_CONFIRM_TIMEOUT_MS = 5000;
 const int MAX_BOOKING_RETRIES = 5;
@@ -82,7 +82,14 @@ int grid_distance(Position a, Position b) {
 
 enum class DriverState { AVAILABLE, RESERVED, BOOKED, OFFLINE };
 
-enum class BookingState { QUEUED, MATCHING, WAITING, BOOKED, COMPLETED, FAILED };
+enum class BookingState {
+  QUEUED,
+  MATCHING,
+  WAITING,
+  BOOKED,
+  COMPLETED,
+  FAILED
+};
 
 string driver_state_name(DriverState s) {
   switch (s) {
@@ -292,7 +299,8 @@ public:
     if (driver_id <= 0)
       return false;
 
-    Position initial_pos = has_pos ? pos : Position{rand() % MAP_W, rand() % MAP_H};
+    Position initial_pos =
+        has_pos ? pos : Position{rand() % MAP_W, rand() % MAP_H};
     Driver *d = driver_ptr_or_create(driver_id, initial_pos);
     if (!d)
       return false;
@@ -609,10 +617,10 @@ private:
             continue;
 
           if (d.state == DriverState::RESERVED) {
-            long long elapsed = chrono::duration_cast<chrono::milliseconds>(
-                                    chrono::steady_clock::now() -
-                                    d.offer_start_time)
-                                    .count();
+            long long elapsed =
+                chrono::duration_cast<chrono::milliseconds>(
+                    chrono::steady_clock::now() - d.offer_start_time)
+                    .count();
 
             if (elapsed >= DRIVER_CONFIRM_TIMEOUT_MS) {
               int booking_id = d.booking_id;
@@ -672,8 +680,8 @@ string format_booking(const BookingView &b) {
 }
 
 string format_driver(const DriverView &d) {
-  return d.state + " " + to_string(d.booking_id) + " " + to_string(d.x) +
-         " " + to_string(d.y);
+  return d.state + " " + to_string(d.booking_id) + " " + to_string(d.x) + " " +
+         to_string(d.y);
 }
 
 string handle_command(BookingSystem &system, const string &line) {
