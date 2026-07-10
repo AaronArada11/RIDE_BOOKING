@@ -211,6 +211,8 @@ Driver client finishes booking 42
 Server -> OK
 ```
 
+The driver client blocks `quit` and `exit` while the driver is `BOOKED`. The ride must be finished first.
+
 When the driver is no longer accepting rides:
 
 ```text

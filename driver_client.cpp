@@ -146,7 +146,7 @@ void print_help() {
        << "  online [x y]       go available for booking\n"
        << "  offline            stop receiving bookings\n"
        << "  help               show this menu\n"
-       << "  quit               exit\n\n";
+       << "  quit               exit when not booked\n\n";
 }
 
 void print_driver_status(const DriverStatus &status) {
@@ -235,8 +235,17 @@ int main(int argc, char **argv) {
     if (cmd.empty())
       continue;
 
-    if (cmd == "quit" || cmd == "exit")
+    if (cmd == "quit" || cmd == "exit") {
+      DriverStatus status = fetch_driver_status(host, port, driver_id);
+      if (status.ok && status.state == "BOOKED") {
+        cout << "Cannot quit while booked";
+        if (status.booking_id >= 0)
+          cout << " on booking #" << status.booking_id;
+        cout << ". Finish the ride first.\n";
+        continue;
+      }
       break;
+    }
 
     if (cmd == "help") {
       print_help();
