@@ -73,15 +73,6 @@ inline string handle_command(BookingSystem &system, const string &line) {
     return resp;
   }
 
-  if (cmd == "CHECK_DOUBLE_BOOKING") {
-    if (has_extra(iss))
-      return "ERR ARGS";
-
-    string detail;
-    return system.check_double_booking(detail) ? "OK" :
-                                                 "ERR DOUBLE_BOOKING " + detail;
-  }
-
   if (cmd == "ONLINE") {
     int id;
     if (!(iss >> id))

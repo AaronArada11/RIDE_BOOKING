@@ -90,36 +90,6 @@ public:
     return result;
   }
 
-  bool check_double_booking(string &detail) {
-    map<int, int> driver_to_booking;
-    vector<unique_lock<mutex>> booking_locks;
-
-    lock_guard<mutex> reg_lock(booking_reg_mtx);
-    booking_locks.reserve(bookings.size());
-    for (auto &entry : bookings)
-      booking_locks.emplace_back(entry.second->mtx);
-
-    for (auto &entry : bookings) {
-      Booking &b = *entry.second;
-      bool active_assignment =
-          (b.state == BookingState::WAITING || b.state == BookingState::BOOKED) &&
-          b.driver_id != -1;
-      if (!active_assignment)
-        continue;
-
-      auto seen = driver_to_booking.find(b.driver_id);
-      if (seen != driver_to_booking.end() && seen->second != b.id) {
-        detail = "driver=" + to_string(b.driver_id) + " bookings=" +
-                 to_string(seen->second) + "," + to_string(b.id);
-        return false;
-      }
-      driver_to_booking[b.driver_id] = b.id;
-    }
-
-    detail = "none";
-    return true;
-  }
-
   bool get_driver(int id, DriverView &out) {
     Driver *d = driver_ptr(id);
     if (!d)
