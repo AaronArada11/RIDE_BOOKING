@@ -63,7 +63,7 @@ const char *DEFAULT_HOST = "127.0.0.1";
 const int DEFAULT_PORT = 8000;
 
 const int AUTO_POLL_MS = 500;
-const int AUTO_ACCEPT_PERCENT = 70;
+const int AUTO_ACCEPT_PERCENT = 90;
 const int AUTO_DECISION_DELAY_MS = 2000;
 const int AUTO_FINISH_DELAY_MS = 5000;
 const int AUTO_MAP_W = 100;
