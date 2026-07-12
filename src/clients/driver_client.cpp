@@ -289,14 +289,6 @@ void render_auto_drivers(int driver_count) {
     cout << left << setw(12) << "ERR" << err << "\n";
     cout << left << setw(12) << "OTHER" << other << "\n\n";
 
-    cout << "ACTIONS\n";
-    cout << "-------\n";
-    cout << left << setw(12) << "online" << auto_online_count.load() << "\n";
-    cout << left << setw(12) << "accepted" << auto_accept_count.load() << "\n";
-    cout << left << setw(12) << "rejected" << auto_reject_count.load() << "\n";
-    cout << left << setw(12) << "finished" << auto_finish_count.load()
-         << "\n\n";
-
     cout << "Ctrl-C to stop\n";
     cout.flush();
     this_thread::sleep_for(chrono::milliseconds(AUTO_POLL_MS));
