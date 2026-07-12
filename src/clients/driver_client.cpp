@@ -1,10 +1,16 @@
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
+#include <mutex>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -51,12 +57,21 @@ void close_socket(SocketHandle fd) { close(fd); }
 bool socket_call_failed(int result) { return result < 0; }
 #endif
 
-bool socket_is_invalid(SocketHandle fd) {
-  return fd == INVALID_SOCKET_HANDLE;
-}
+bool socket_is_invalid(SocketHandle fd) { return fd == INVALID_SOCKET_HANDLE; }
 
 const char *DEFAULT_HOST = "127.0.0.1";
 const int DEFAULT_PORT = 8000;
+
+const int AUTO_POLL_MS = 500;
+const int AUTO_ACCEPT_PERCENT = 70;
+const int AUTO_DECISION_DELAY_MS = 2000;
+const int AUTO_FINISH_DELAY_MS = 5000;
+const int AUTO_MAP_W = 100;
+const int AUTO_MAP_H = 100;
+
+atomic<bool> auto_running(true);
+
+void handle_auto_stop(int) { auto_running.store(false); }
 
 string send_command(const string &host, int port, const string &command) {
   if (!socket_startup())
@@ -155,8 +170,8 @@ void print_driver_status(const DriverStatus &status) {
     return;
   }
 
-  cout << "Driver is " << status.state << " at (" << status.x << ","
-       << status.y << ")";
+  cout << "Driver is " << status.state << " at (" << status.x << "," << status.y
+       << ")";
   if (status.booking_id >= 0)
     cout << " with booking #" << status.booking_id;
   cout << ".\n";
@@ -206,7 +221,176 @@ int resolve_booking_id(const string &host, int port, int driver_id,
   return status.booking_id;
 }
 
+struct AutoDriverRow {
+  string state = "STARTING";
+  int booking_id = -1;
+};
+
+mutex auto_driver_mtx;
+vector<AutoDriverRow> auto_driver_rows;
+atomic<int> auto_online_count(0);
+atomic<int> auto_accept_count(0);
+atomic<int> auto_reject_count(0);
+atomic<int> auto_finish_count(0);
+
+void set_auto_driver_row(int driver_id, const string &state, int booking_id) {
+  lock_guard<mutex> lock(auto_driver_mtx);
+  if (driver_id > 0 && driver_id <= static_cast<int>(auto_driver_rows.size())) {
+    auto_driver_rows[driver_id - 1].state = state;
+    auto_driver_rows[driver_id - 1].booking_id = booking_id;
+  }
+}
+
+void render_auto_drivers(int driver_count) {
+  auto started = chrono::steady_clock::now();
+  while (auto_running.load()) {
+    vector<AutoDriverRow> snapshot;
+    {
+      lock_guard<mutex> lock(auto_driver_mtx);
+      snapshot = auto_driver_rows;
+    }
+
+    int available = 0, reserved = 0, booked = 0, offline = 0, err = 0;
+    int starting = 0, other = 0;
+    for (const AutoDriverRow &r : snapshot) {
+      if (r.state == "AVAILABLE")
+        available++;
+      else if (r.state == "RESERVED")
+        reserved++;
+      else if (r.state == "BOOKED")
+        booked++;
+      else if (r.state == "OFFLINE")
+        offline++;
+      else if (r.state == "ERR")
+        err++;
+      else if (r.state == "STARTING")
+        starting++;
+      else
+        other++;
+    }
+
+    int elapsed = static_cast<int>(chrono::duration_cast<chrono::seconds>(
+                                       chrono::steady_clock::now() - started)
+                                       .count());
+
+    cout << "\033[H\033[J";
+    cout << "Driver Client --auto\n\n";
+    cout << "drivers=" << driver_count << "  poll=" << AUTO_POLL_MS
+         << "ms  accept_rate=" << AUTO_ACCEPT_PERCENT
+         << "%  elapsed=" << elapsed << "s\n\n";
+
+    cout << left << setw(12) << "STATE" << "COUNT\n";
+    cout << "------------------\n";
+    cout << left << setw(12) << "STARTING" << starting << "\n";
+    cout << left << setw(12) << "AVAILABLE" << available << "\n";
+    cout << left << setw(12) << "RESERVED" << reserved << "\n";
+    cout << left << setw(12) << "BOOKED" << booked << "\n";
+    cout << left << setw(12) << "OFFLINE" << offline << "\n";
+    cout << left << setw(12) << "ERR" << err << "\n";
+    cout << left << setw(12) << "OTHER" << other << "\n\n";
+
+    cout << "ACTIONS\n";
+    cout << "-------\n";
+    cout << left << setw(12) << "online" << auto_online_count.load() << "\n";
+    cout << left << setw(12) << "accepted" << auto_accept_count.load() << "\n";
+    cout << left << setw(12) << "rejected" << auto_reject_count.load() << "\n";
+    cout << left << setw(12) << "finished" << auto_finish_count.load()
+         << "\n\n";
+
+    cout << "Ctrl-C to stop\n";
+    cout.flush();
+    this_thread::sleep_for(chrono::milliseconds(AUTO_POLL_MS));
+  }
+}
+
+void auto_driver_worker(int driver_id, const string &host, int port) {
+  mt19937 rng(static_cast<unsigned>(time(nullptr)) + driver_id * 7919);
+  uniform_int_distribution<int> xdist(0, AUTO_MAP_W - 1);
+  uniform_int_distribution<int> ydist(0, AUTO_MAP_H - 1);
+  uniform_int_distribution<int> decision(0, 99);
+
+  int x = xdist(rng);
+  int y = ydist(rng);
+  string resp = send_command(host, port,
+                             "ONLINE " + to_string(driver_id) + " " +
+                                 to_string(x) + " " + to_string(y));
+  if (resp == "OK") {
+    auto_online_count++;
+    set_auto_driver_row(driver_id, "AVAILABLE", -1);
+  } else {
+    set_auto_driver_row(driver_id, "ERR", -1);
+  }
+
+  int finishing_booking = -1;
+  while (auto_running.load()) {
+    DriverStatus status = fetch_driver_status(host, port, driver_id);
+    if (!status.ok) {
+      set_auto_driver_row(driver_id, "ERR", -1);
+      this_thread::sleep_for(chrono::milliseconds(AUTO_POLL_MS));
+      continue;
+    }
+
+    set_auto_driver_row(driver_id, status.state, status.booking_id);
+
+    if (status.state == "RESERVED" && status.booking_id >= 0) {
+      this_thread::sleep_for(chrono::milliseconds(AUTO_DECISION_DELAY_MS));
+      bool accept = decision(rng) < AUTO_ACCEPT_PERCENT;
+      string cmd = string(accept ? "ACCEPT " : "REJECT ") +
+                   to_string(driver_id) + " " + to_string(status.booking_id);
+      resp = send_command(host, port, cmd);
+      if (resp == "OK") {
+        if (accept)
+          auto_accept_count++;
+        else
+          auto_reject_count++;
+      }
+    } else if (status.state == "BOOKED" && status.booking_id >= 0 &&
+               finishing_booking != status.booking_id) {
+      finishing_booking = status.booking_id;
+      this_thread::sleep_for(chrono::milliseconds(AUTO_FINISH_DELAY_MS));
+      resp = send_command(host, port,
+                          "FINISH " + to_string(driver_id) + " " +
+                              to_string(status.booking_id));
+      if (resp == "OK")
+        auto_finish_count++;
+      finishing_booking = -1;
+    }
+
+    this_thread::sleep_for(chrono::milliseconds(AUTO_POLL_MS));
+  }
+
+  send_command(host, port, "OFFLINE " + to_string(driver_id));
+  set_auto_driver_row(driver_id, "OFFLINE", -1);
+}
+
+int run_auto_drivers(int count, const string &host, int port) {
+  if (count < 1)
+    count = 1;
+
+  signal(SIGINT, handle_auto_stop);
+  signal(SIGTERM, handle_auto_stop);
+
+  auto_driver_rows.assign(count, AutoDriverRow{});
+
+  vector<thread> workers;
+  thread renderer(render_auto_drivers, count);
+  for (int id = 1; id <= count; id++)
+    workers.emplace_back(auto_driver_worker, id, cref(host), port);
+
+  for (thread &t : workers)
+    t.join();
+  renderer.join();
+  return 0;
+}
+
 int main(int argc, char **argv) {
+  if (argc >= 2 && string(argv[1]) == "--auto") {
+    int count = argc >= 3 ? atoi(argv[2]) : 50;
+    string host = argc >= 4 ? argv[3] : DEFAULT_HOST;
+    int port = argc >= 5 ? atoi(argv[4]) : DEFAULT_PORT;
+    return run_auto_drivers(count, host, port);
+  }
+
   string host = DEFAULT_HOST;
   int port = DEFAULT_PORT;
   int driver_id = 1;
@@ -352,8 +536,8 @@ int main(int argc, char **argv) {
       iss >> px >> py >> dx >> dy;
 
       cout << send_command(host, port,
-                           "BOOK " + to_string(px) + " " + to_string(py) +
-                               " " + to_string(dx) + " " + to_string(dy))
+                           "BOOK " + to_string(px) + " " + to_string(py) + " " +
+                               to_string(dx) + " " + to_string(dy))
            << "\n";
       continue;
     }
