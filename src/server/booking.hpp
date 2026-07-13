@@ -3,6 +3,7 @@
 #include "../common/types.hpp"
 
 #include <mutex>
+#include <vector>
 
 using namespace std;
 
@@ -13,5 +14,6 @@ struct Booking {
   int retry_count;
   Position pickup;
   Position destination;
+  vector<int> skipped_driver_ids;
   mutex mtx;
 };

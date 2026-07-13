@@ -224,6 +224,16 @@ public:
       d->state = DriverState::AVAILABLE;
       d->booking_id = -1;
 
+      bool already_skipped = false;
+      for (int skipped_id : b->skipped_driver_ids) {
+        if (skipped_id == driver_id) {
+          already_skipped = true;
+          break;
+        }
+      }
+      if (!already_skipped)
+        b->skipped_driver_ids.push_back(driver_id);
+
       should_requeue = requeue_or_fail_booking_locked(*b);
     }
 
@@ -338,9 +348,23 @@ private:
     return true;
   }
 
-  int find_nearest_driver(Position pickup) {
+  bool is_skipped_driver(const vector<int> &skipped_ids, int driver_id) {
+    for (int skipped_id : skipped_ids) {
+      if (skipped_id == driver_id)
+        return true;
+    }
+    return false;
+  }
+
+  int find_nearest_driver(Position pickup, Booking *booking) {
     int best_id = -1;
     int best_distance = INT_MAX;
+    vector<int> skipped_ids;
+
+    if (booking) {
+      lock_guard<mutex> booking_lock(booking->mtx);
+      skipped_ids = booking->skipped_driver_ids;
+    }
 
     for (int pass = 0; pass < 3; pass++) {
       lock_guard<mutex> reg_lock(driver_reg_mtx);
@@ -349,7 +373,8 @@ private:
         if (!d.mtx.try_lock())
           continue;
 
-        if (d.state == DriverState::AVAILABLE) {
+        if (d.state == DriverState::AVAILABLE &&
+            !is_skipped_driver(skipped_ids, d.id)) {
           int dd = grid_distance(d.pos, pickup);
           if (dd < best_distance) {
             best_distance = dd;
@@ -387,7 +412,7 @@ private:
                 "dispatcher started matching");
 
       while (true) {
-        int driver_id = find_nearest_driver(pickup);
+        int driver_id = find_nearest_driver(pickup, b);
 
         if (driver_id < 0) {
           this_thread::sleep_for(chrono::milliseconds(2000));
